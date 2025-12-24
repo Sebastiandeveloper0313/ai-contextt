@@ -1,8 +1,7 @@
 // Supabase Edge Function for AI chat assistant
-// Handles chat requests with page context and memory integration
+// Simple AI assistant that sees page context
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import OpenAI from 'https://deno.land/x/openai@v4.20.1/mod.ts'
 
 const corsHeaders = {
@@ -37,93 +36,36 @@ serve(async (req) => {
       )
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseKey)
-
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')!
     const openai = new OpenAI({ apiKey: openaiApiKey })
 
-    // Get relevant memories
-    let relevantMemories: any[] = []
-    try {
-      // Generate embedding for user message
-      const embeddingResponse = await openai.embeddings.create({
-        model: 'text-embedding-3-small',
-        input: message,
-      })
-      const queryEmbedding = embeddingResponse.data[0].embedding
-
-      // Search memories
-      const { data: memories } = await supabase.rpc('match_memories', {
-        query_embedding: `[${queryEmbedding.join(',')}]`,
-        user_id_filter: userId,
-        match_threshold: 0.6,
-        match_count: 5
-      })
-
-      relevantMemories = memories || []
-    } catch (error) {
-      console.error('Error searching memories:', error)
-    }
-
-    // Build context for AI
-    let contextParts: string[] = []
+    // Build context from page only - format naturally without labels
+    let contextText = ''
 
     if (pageContext) {
-      contextParts.push(`Current Page Context:
-- URL: ${pageContext.url}
-- Title: ${pageContext.title}
-${pageContext.selectedText ? `- Selected Text: ${pageContext.selectedText}` : ''}
-- Page Content: ${pageContext.text.substring(0, 3000)}`)
+      contextText = `The user is currently viewing: ${pageContext.title} (${pageContext.url})
+
+${pageContext.selectedText ? `They have selected this text: "${pageContext.selectedText}"\n\n` : ''}Page content:
+${pageContext.text.substring(0, 5000)}`
     }
 
-    if (relevantMemories.length > 0) {
-      contextParts.push(`Relevant Past Memories:
-${relevantMemories.map((m: any) => `- ${m.summary}: ${m.content.substring(0, 200)}`).join('\n')}`)
-    }
+    const systemPrompt = `You are a helpful AI assistant that can see the web page the user is currently viewing.
 
-    // Get active thread if available
-    let threadContext = ''
-    try {
-      const { data: activeThreadId } = await supabase
-        .from('threads')
-        .select('id, title, description')
-        .eq('user_id', userId)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .single()
+When responding:
+- Answer directly and naturally, as if you're having a conversation
+- DO NOT include labels like "URL Information:", "Page Content Overview:", "User Question:", or "Response:" in your answer
+- DO NOT repeat or structure the question back to the user
+- Simply provide a helpful, direct answer based on what you see on the page
+- Reference specific information from the page when relevant
+- Use Markdown formatting (bold, headings, lists, code blocks) to make your response clear and readable
 
-      if (activeThreadId) {
-        threadContext = `\nActive Thread: ${activeThreadId.title} - ${activeThreadId.description}`
-      }
-    } catch (error) {
-      // No active thread, that's okay
-    }
+Be concise, helpful, and context-aware.`
 
-    const systemPrompt = `You are Memory Layer, an AI assistant that helps users understand and work with information across their browsing sessions.
+    const userPrompt = contextText ? `${contextText}
 
-You have access to:
-1. The current page the user is viewing
-2. Their past memories and conversations
-3. Active threads/projects they're working on
+${message}` : `${message}
 
-Be helpful, concise, and context-aware. Reference specific information from the page or memories when relevant.
-
-IMPORTANT: Format your responses using Markdown for better readability:
-- Use **bold** for emphasis and important terms
-- Use headings (##, ###) to organize sections
-- Use bullet points (-) or numbered lists for multiple items
-- Use \`code\` for technical terms, file names, or code snippets
-- Use blockquotes (>) for quotes or important notes
-- Add line breaks between paragraphs for clarity
-- Use horizontal rules (---) to separate major sections`
-
-    const userPrompt = `${contextParts.join('\n\n')}${threadContext}
-
-User Question: ${message}
-
-Provide a helpful, well-formatted response based on the context above. Use Markdown formatting (headings, bold, lists, code blocks) to make your response clear and easy to read.`
+${pageContext ? `(Note: I'm viewing ${pageContext.title} but couldn't access the full page content.)` : '(No page context available.)'}`
 
     // Call OpenAI
     const completion = await openai.chat.completions.create({
@@ -139,13 +81,9 @@ Provide a helpful, well-formatted response based on the context above. Use Markd
 
     const response = completion.choices[0]?.message?.content || 'I apologize, but I could not generate a response.'
 
-    // Optionally store this interaction as a memory if it's meaningful
-    // (You could add logic here to extract and store important information)
-
     return new Response(
       JSON.stringify({ 
         response,
-        memoriesUsed: relevantMemories.length,
         hasPageContext: !!pageContext
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

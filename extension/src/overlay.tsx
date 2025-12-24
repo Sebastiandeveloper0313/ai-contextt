@@ -122,39 +122,6 @@ const OverlayChat: React.FC = () => {
         });
       });
 
-      // Call search-memories for relevant context
-      const searchResponse = await fetch(`${config.url}/functions/v1/search-memories`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.key}`
-        },
-        body: JSON.stringify({
-          userId,
-          query: input
-        })
-      });
-
-      let relevantMemories = [];
-      if (searchResponse.ok) {
-        const searchData = await searchResponse.json();
-        relevantMemories = searchData.memories || [];
-      }
-
-      // Build context for AI
-      const contextText = `
-Current Page Context:
-- URL: ${pageContext.url}
-- Title: ${pageContext.title}
-- Selected Text: ${pageContext.selectedText}
-- Page Content (excerpt): ${pageContext.text.substring(0, 2000)}
-
-Relevant Past Memories:
-${relevantMemories.map((m: any) => `- ${m.summary}`).join('\n')}
-
-User Question: ${input}
-`;
-
       // Call chat-assistant Edge Function
       const chatResponse = await fetch(`${config.url}/functions/v1/chat-assistant`, {
         method: 'POST',
@@ -249,7 +216,7 @@ User Question: ${input}
       <div className="overlay-messages">
         {messages.length === 0 ? (
           <div className="overlay-empty">
-            <p>Ask me anything about this page or your past conversations!</p>
+            <p>Ask me anything about this page!</p>
             <p className="hint">I can see: {document.title}</p>
           </div>
         ) : (
@@ -272,7 +239,7 @@ User Question: ${input}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Ask about this page or your memories..."
+          placeholder="Ask about this page..."
           rows={2}
         />
         <button className="overlay-send" onClick={sendMessage} disabled={loading || !input.trim()}>
