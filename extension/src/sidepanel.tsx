@@ -19,6 +19,7 @@ interface ChatMessage {
     outputType?: 'sheet' | 'csv' | 'table' | 'text';
     requiresConfirmation: boolean;
   };
+  csvData?: string; // Store CSV data for easy copying
 }
 
 interface PlanState {
@@ -273,72 +274,88 @@ const ChatInterface: React.FC = () => {
     setPlanState({ ...planState, isExecuting: true, executionResults: [], currentStep: 0 });
 
     // Convert plan steps to execution steps
+    // Track mapping: executionStepIndex -> planStepIndex
     let executionSteps: ExecutionStep[] = [];
+    const stepMapping: Map<number, number> = new Map(); // execution index -> plan index
     let previousWasSearch = false;
     
     console.log('[Execute Plan] Converting', planState.plan.steps.length, 'plan steps to execution steps');
     
-    for (let index = 0; index < planState.plan.steps.length; index++) {
-      const step = planState.plan.steps[index];
+    for (let planIndex = 0; planIndex < planState.plan.steps.length; planIndex++) {
+      const step = planState.plan.steps[planIndex];
       const lowerStep = step.toLowerCase();
       
       if (lowerStep.includes('search') || (lowerStep.includes('google') && lowerStep.includes('search'))) {
         const query = step.match(/search.*?for\s+["']?([^"']+)["']?/i)?.[1] || 
                       step.match(/["']([^"']+)["']/)?.[1] || '';
+        const execIndex = executionSteps.length;
         executionSteps.push({
           type: 'search' as const,
           description: step,
           params: { query }
         });
+        stepMapping.set(execIndex, planIndex);
         previousWasSearch = true;
       } else if (lowerStep.includes('extract') || lowerStep.includes('get') || lowerStep.includes('collect') || 
                  lowerStep.includes('compile') || lowerStep.includes('list')) {
         // After a search step, extract from search results
         // Otherwise use generic selectors
+        const execIndex = executionSteps.length;
         executionSteps.push({
           type: 'extract' as const,
           description: step,
           params: { selector: previousWasSearch ? 'div.g, div[data-ved]' : 'div.g, div[data-ved], .result, .item, a, h3' }
         });
+        stepMapping.set(execIndex, planIndex);
         previousWasSearch = false;
       } else if (lowerStep.includes('navigate') || lowerStep.includes('go to')) {
         const url = step.match(/https?:\/\/[^\s]+/)?.[0] || '';
         if (url) {
+          const execIndex = executionSteps.length;
           executionSteps.push({
             type: 'navigate' as const,
             description: step,
             params: { url }
           });
+          stepMapping.set(execIndex, planIndex);
         }
         // Skip if no URL found (might be "open a new tab" which we don't need)
         previousWasSearch = false;
       } else if (lowerStep.includes('open') && (lowerStep.includes('tab') || lowerStep.includes('new tab'))) {
-        // Skip "open a new tab" - we're already in browser context
-        console.log('[Execute Plan] Skipping step:', step);
+        // Skip "open a new tab" - navigate() will create tabs automatically
+        // We'll mark it as automatically completed (not skipped) in the UI
+        console.log('[Execute Plan] Skipping "open new tab" step - tabs are created automatically during navigation');
         previousWasSearch = false;
-        // Don't add any step, just continue
+        // Don't add any execution step, but mark the plan step as auto-completed
+        // The next navigation step will handle tab creation
       } else if (lowerStep.includes('create') && (lowerStep.includes('sheet') || lowerStep.includes('csv'))) {
+        const execIndex = executionSteps.length;
         executionSteps.push({
           type: 'create_output' as const,
           description: step,
           params: { outputType: planState.plan.outputType || 'csv' }
         });
+        stepMapping.set(execIndex, planIndex);
         previousWasSearch = false;
       } else if (lowerStep.includes('wait') || lowerStep.includes('delay')) {
+        const execIndex = executionSteps.length;
         executionSteps.push({
           type: 'wait' as const,
           description: step,
           params: { text: '2000' } // 2 seconds for page loads
         });
+        stepMapping.set(execIndex, planIndex);
         previousWasSearch = false;
       } else {
         // For steps like "compile list" or "format", add a wait to ensure page is loaded
         if (previousWasSearch) {
+          const execIndex = executionSteps.length;
           executionSteps.push({
             type: 'wait' as const,
             description: 'Wait for page to load',
             params: { text: '2000' }
           });
+          stepMapping.set(execIndex, planIndex);
         }
         previousWasSearch = false;
       }
@@ -362,16 +379,20 @@ const ChatInterface: React.FC = () => {
           }
         }
         if (lastSearchIndex >= 0) {
+          // Find the plan index for the search step
+          const searchPlanIndex = Array.from(stepMapping.entries()).find(([execIdx]) => execIdx === lastSearchIndex)?.[1] ?? lastSearchIndex;
           executionSteps.splice(lastSearchIndex + 1, 0, {
             type: 'wait',
             description: 'Wait for search results to load',
             params: { text: '2000' }
           });
+          stepMapping.set(lastSearchIndex + 1, searchPlanIndex);
           executionSteps.splice(lastSearchIndex + 2, 0, {
             type: 'extract',
             description: 'Extract search results',
             params: { selector: 'div.g, div[data-ved]' }
           });
+          stepMapping.set(lastSearchIndex + 2, searchPlanIndex);
         }
       }
       
@@ -381,14 +402,22 @@ const ChatInterface: React.FC = () => {
       
       // Add output creation at the end if not already present
       if (!hasOutput && outputSteps.length === 0) {
+        const execIndex = executionSteps.length;
+        const lastPlanIndex = planState.plan.steps.length - 1;
         executionSteps.push({
           type: 'create_output',
           description: `Create ${planState.plan.outputType} output`,
           params: { outputType: planState.plan.outputType }
         });
+        stepMapping.set(execIndex, lastPlanIndex);
       } else if (outputSteps.length > 0) {
         // Add existing output steps at the end
-        executionSteps.push(...outputSteps);
+        const lastPlanIndex = planState.plan.steps.length - 1;
+        outputSteps.forEach((step, idx) => {
+          const execIndex = executionSteps.length;
+          executionSteps.push(step);
+          stepMapping.set(execIndex, lastPlanIndex);
+        });
       }
     }
     
@@ -408,14 +437,49 @@ const ChatInterface: React.FC = () => {
       return;
     }
 
+    // Log the step mapping for debugging
+    console.log('[Execute Plan] Step mapping:', Array.from(stepMapping.entries()).map(([exec, plan]) => `exec ${exec} -> plan ${plan}`));
+    
     executionEngine.current.executePlan(
       executionSteps,
       (result: ExecutionResult) => {
-        setPlanState(prev => prev ? {
-          ...prev,
-          executionResults: [...prev.executionResults, result],
-          currentStep: result.stepIndex
-        } : null);
+        // Map execution step index to plan step index
+        const planStepIndex = stepMapping.get(result.stepIndex);
+        console.log('[Execute Plan] Result from execution step', result.stepIndex, 'mapped to plan step', planStepIndex, 'status:', result.status, 'success:', result.success);
+        
+        if (planStepIndex === undefined) {
+          console.warn('[Execute Plan] No mapping found for execution step', result.stepIndex, '- skipping result');
+          // Don't add unmapped results
+          return;
+        }
+        
+        const mappedResult = { ...result, stepIndex: planStepIndex };
+        console.log('[Execute Plan] Adding mapped result:', { planStep: planStepIndex, status: mappedResult.status, success: mappedResult.success });
+        
+        setPlanState(prev => {
+          if (!prev) return null;
+          
+          // Check if we already have a result for this plan step
+          const existingIndex = prev.executionResults.findIndex(r => r.stepIndex === planStepIndex);
+          let newResults: ExecutionResult[];
+          
+          if (existingIndex >= 0) {
+            // Replace existing result
+            newResults = [...prev.executionResults];
+            newResults[existingIndex] = mappedResult;
+            console.log('[Execute Plan] Replaced existing result for plan step', planStepIndex);
+          } else {
+            // Add new result
+            newResults = [...prev.executionResults, mappedResult];
+            console.log('[Execute Plan] Added new result for plan step', planStepIndex);
+          }
+          
+          return {
+            ...prev,
+            executionResults: newResults,
+            currentStep: planStepIndex
+          };
+        });
       },
       (results: ExecutionResult[]) => {
         const successCount = results.filter(r => r.success).length;
@@ -425,11 +489,27 @@ const ChatInterface: React.FC = () => {
         let completionText = `✅ Execution complete! ${successCount} of ${totalSteps} steps succeeded.`;
         
         // Check if we created a CSV/Sheet
-        const outputStep = results.find(r => r.data?.rowCount);
+        const outputStep = results.find(r => r.data?.rowCount || r.data?.csv);
         if (outputStep?.data) {
-          completionText += `\n\n📊 Created ${outputStep.data.rowCount} rows of data.`;
+          const rowCount = outputStep.data.rowCount || 0;
+          completionText += `\n\n📊 Created ${rowCount} rows of data.`;
+          
+          // Store CSV data for easy access
+          if (outputStep.data.csv) {
+            // Store in state for copy button
+            setMessages(prev => {
+              const lastMsg = prev[prev.length - 1];
+              if (lastMsg && lastMsg.mode === 'do') {
+                return [...prev.slice(0, -1), { ...lastMsg, csvData: outputStep.data.csv }];
+              }
+              return prev;
+            });
+          }
+          
           if (outputStep.data.instructions) {
             completionText += `\n\n${outputStep.data.instructions}`;
+          } else if (outputStep.data.csv) {
+            completionText += `\n\n💡 **Quick Import:** Click the "Copy CSV" button below, then in Google Sheets, select cell A1 and press Ctrl+V to paste.`;
           }
         }
         
@@ -438,10 +518,12 @@ const ChatInterface: React.FC = () => {
           role: 'assistant',
           content: completionText,
           timestamp: Date.now(),
-          mode: 'do'
+          mode: 'do',
+          csvData: outputStep?.data?.csv // Store CSV data in message
         };
-        setMessages(prev => [...prev, completionMessage]);
-        saveChatHistory([...messages, completionMessage]);
+        const updatedMessages = [...messages, completionMessage];
+        setMessages(updatedMessages);
+        saveChatHistory(updatedMessages);
 
         // Clear plan state after a short delay to show completion
         setTimeout(() => {
@@ -593,6 +675,37 @@ const ChatInterface: React.FC = () => {
                 ) : (
                   <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                 )}
+                
+                {/* Copy CSV button if message has CSV data */}
+                {msg.csvData && (
+                  <div style={{ marginTop: '8px' }}>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(msg.csvData!);
+                          alert('CSV data copied to clipboard! Go to Google Sheets, select cell A1, and press Ctrl+V to paste.');
+                        } catch (err) {
+                          console.error('Failed to copy:', err);
+                          // Fallback: show in alert
+                          alert('Copy failed. CSV data:\n\n' + msg.csvData!.substring(0, 500) + '...');
+                        }
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        border: '1px solid #2196f3',
+                        borderRadius: '6px',
+                        backgroundColor: '#fff',
+                        color: '#2196f3',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        marginTop: '8px'
+                      }}
+                    >
+                      📋 Copy CSV to Clipboard
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))
@@ -651,24 +764,40 @@ const ChatInterface: React.FC = () => {
             <div style={{ marginBottom: '12px' }}>
               <strong style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '8px' }}>Execution Plan:</strong>
               <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '13px' }}>
-                {planState.plan.steps.map((step, index) => {
-                  const result = planState.executionResults.find(r => r.stepIndex === index);
-                  const isCurrent = planState.isExecuting && planState.currentStep === index;
+                {planState.plan.steps.map((step, planIndex) => {
+                  const result = planState.executionResults.find(r => r.stepIndex === planIndex);
+                  const isCurrent = planState.isExecuting && planState.currentStep === planIndex;
+                  const lowerStep = step.toLowerCase();
+                  const isAutoCompleted = (lowerStep.includes('open') && (lowerStep.includes('tab') || lowerStep.includes('new tab')));
+                  const isSkipped = (lowerStep.includes('navigate') && !step.match(/https?:\/\/[^\s]+/));
+                  
                   return (
-                    <li key={index} style={{
+                    <li key={planIndex} style={{
                       marginBottom: '4px',
-                      color: result?.success === false ? '#f44336' : 
-                             result?.success === true ? '#4caf50' :
+                      color: isSkipped ? '#999' :
+                             result?.success === false ? '#f44336' : 
+                             result?.success === true || isAutoCompleted ? '#4caf50' :
                              isCurrent ? '#2196f3' : '#333',
-                      fontWeight: isCurrent ? '600' : 'normal'
+                      fontWeight: isCurrent ? '600' : 'normal',
+                      fontStyle: isSkipped ? 'italic' : 'normal'
                     }}>
                       {step}
-                      {result && (
-                        <span style={{ fontSize: '11px', marginLeft: '8px', color: '#666' }}>
+                      {isAutoCompleted && (
+                        <span style={{ fontSize: '11px', marginLeft: '8px', color: '#4caf50' }}>
+                          ✓ Auto-completed (handled by navigation)
+                        </span>
+                      )}
+                      {isSkipped && (
+                        <span style={{ fontSize: '11px', marginLeft: '8px', color: '#999' }}>
+                          ⊘ Skipped
+                        </span>
+                      )}
+                      {!isSkipped && !isAutoCompleted && result && (
+                        <span style={{ fontSize: '11px', marginLeft: '8px', color: result.success ? '#4caf50' : '#f44336' }}>
                           {result.success ? '✓' : '✗'} {result.status}
                         </span>
                       )}
-                      {isCurrent && !result && (
+                      {!isSkipped && !isAutoCompleted && isCurrent && !result && (
                         <span style={{ fontSize: '11px', marginLeft: '8px', color: '#2196f3' }}>
                           ⏳ Executing...
                         </span>

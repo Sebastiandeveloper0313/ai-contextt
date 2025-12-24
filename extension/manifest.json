@@ -10,7 +10,8 @@
     "tabs",
     "scripting",
     "downloads",
-    "clipboardWrite"
+    "clipboardWrite",
+    "identity"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
@@ -49,6 +50,12 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+    "oauth2": {
+      "client_id": "1084441561892-uummminep17faamh2a8omiji9njlse1k.apps.googleusercontent.com",
+      "scopes": [
+        "https://www.googleapis.com/auth/spreadsheets"
+      ]
+    }
 }
 
