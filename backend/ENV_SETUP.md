@@ -36,3 +36,4 @@ OPENAI_API_KEY=sk-...
 - Consider using Supabase's `anon` key for client-side operations (if you add client-side features)
 
 
+

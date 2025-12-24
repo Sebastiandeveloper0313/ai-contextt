@@ -48,3 +48,4 @@ When you're ready to launch:
 
 Once you enable Email auth in Supabase, users can just sign up and use it!
 
+

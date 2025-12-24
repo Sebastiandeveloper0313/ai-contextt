@@ -137,3 +137,4 @@ ChatGPT's UI changes frequently. The extension looks for:
    - Check ChatGPT hasn't changed their UI
 
 
+

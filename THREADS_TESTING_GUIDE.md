@@ -176,3 +176,4 @@ Once basic functionality works:
 - Try resuming threads in new chat sessions
 - Check that thread descriptions update as you add more memories
 
+

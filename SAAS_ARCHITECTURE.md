@@ -43,3 +43,4 @@ Extension → Backend API → Supabase
 3. Remove Supabase config from extension
 4. Deploy backend
 
+

@@ -92,7 +92,17 @@ class ConversationMonitor {
     this.extractMessages();
   }
 
+  private isTabVisible(): boolean {
+    // Only process if tab is visible (not in background)
+    return !document.hidden;
+  }
+
   private extractMessages() {
+    // Don't process if tab is in background (saves API costs)
+    if (!this.isTabVisible()) {
+      return;
+    }
+
     // ChatGPT message selectors - Updated for current UI
     // Based on inspection: messages have data-message-author-role attribute
     let messageElements = document.querySelectorAll('[data-message-author-role]');
@@ -231,6 +241,12 @@ class ConversationMonitor {
       return;
     }
 
+    // Don't send if tab is in background (saves API costs)
+    if (!this.isTabVisible()) {
+      console.log('[Memory Layer] ⏸️ Tab is in background, skipping chunk send');
+      return;
+    }
+
     console.log('[Memory Layer] 📤 Preparing to send chunk with', this.currentThread.length, 'messages');
 
     const chunk: ConversationChunk = {
@@ -365,21 +381,19 @@ console.log('[Memory Layer] Hostname:', window.location.hostname);
 console.log('[Memory Layer] Full URL:', window.location.href);
 console.log('[Memory Layer] ========================================');
 
+// ChatGPT conversation monitoring is DISABLED - app has pivoted to screen-aware AI assistant
+// The extension now focuses on page context and overlay chat, not ChatGPT memory extraction
 if (window.location.hostname === 'chat.openai.com' || 
     window.location.hostname === 'chatgpt.com' || 
     window.location.hostname.includes('openai.com') ||
     window.location.hostname.includes('chatgpt.com')) {
-  console.log('[Memory Layer] ✅ Initializing on ChatGPT page');
-  const monitor = new ConversationMonitor();
+  console.log('[Memory Layer] ℹ️ ChatGPT page detected - conversation monitoring is disabled');
+  console.log('[Memory Layer] 💡 Use the side panel or overlay chat for AI assistance');
   
-  // Expose to background script
-  (window as any).memoryLayerMonitor = monitor;
-
-  // Listen for messages from side panel
+  // Only keep message listener for side panel context requests (on-demand only, no automatic processing)
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'GET_CURRENT_CONTEXT') {
-      // Extract current conversation context
-      // Try new selector first, fallback to old
+      // Extract current conversation context for side panel (on-demand only)
       let messageEls = document.querySelectorAll('[data-message-author-role]');
       if (messageEls.length === 0) {
         messageEls = document.querySelectorAll('[data-testid="conversation-turn"]');
@@ -394,28 +408,6 @@ if (window.location.hostname === 'chat.openai.com' ||
         .join(' ');
       
       sendResponse({ context: messages });
-      return true;
-    }
-
-    if (message.type === 'FETCH_CONTEXT') {
-      monitor.getRelevantContext(message.query).then((memories) => {
-        sendResponse({ memories });
-      });
-      return true;
-    }
-
-    if (message.type === 'INJECT_CONTEXT') {
-      // Try to inject context into ChatGPT input
-      const textarea = document.querySelector('textarea[data-id="root"]') as HTMLTextAreaElement ||
-                      document.querySelector('textarea') as HTMLTextAreaElement;
-      
-      if (textarea) {
-        const currentValue = textarea.value || '';
-        const newValue = `${message.context}\n\n---\n\n${currentValue}`;
-        textarea.value = newValue;
-        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      sendResponse({ success: true });
       return true;
     }
   });

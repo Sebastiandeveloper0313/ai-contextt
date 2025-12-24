@@ -8,3 +8,4 @@ Place your extension icons here:
 You can create simple icons or use a placeholder image generator.
 
 
+

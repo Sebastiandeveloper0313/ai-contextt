@@ -40,3 +40,4 @@ For MVP: **Option A** (hardcode your Supabase)
 
 Would you like me to implement Option A (quick) or Option B (proper backend)?
 
+

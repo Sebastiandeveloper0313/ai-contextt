@@ -53,3 +53,4 @@ We'll update the extension to use your Supabase URL. The extension will call:
 Run these commands one by one and let me know when you're done or if you hit any errors!
 
 
+

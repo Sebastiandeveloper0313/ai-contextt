@@ -119,3 +119,4 @@ const SearchView: React.FC<SearchViewProps> = ({ userId, apiUrl }) => {
 export default SearchView;
 
 
+

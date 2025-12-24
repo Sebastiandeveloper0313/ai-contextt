@@ -119,7 +119,7 @@ app.post('/api/chat', verifyAuth, async (req, res) => {
 
   // Call OpenAI
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4-turbo-preview',
+    model: 'gpt-3.5-turbo',
     messages: [
       { role: 'system', content: 'You are Memory Layer, an AI assistant that helps users understand and work with information.' },
       ...(conversationHistory || []).slice(-6),
@@ -155,7 +155,7 @@ app.post('/api/conversations', verifyAuth, async (req, res) => {
   const prompt = `Analyze the following conversation and extract meaningful memories...`;
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4-turbo-preview',
+    model: 'gpt-3.5-turbo',
     messages: [
       { role: 'system', content: 'You are a memory extraction system.' },
       { role: 'user', content: prompt }
@@ -210,4 +210,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Memory Layer API running on port ${PORT}`);
 });
+
 

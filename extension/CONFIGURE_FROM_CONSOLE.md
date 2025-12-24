@@ -49,3 +49,4 @@ Then the content script will listen for this and configure it.
 Actually, the easiest way is to add a configuration UI in the side panel. Let me update that!
 
 
+

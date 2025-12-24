@@ -82,7 +82,17 @@ class ConversationMonitor {
     this.extractMessages();
   }
 
+  private isTabVisible(): boolean {
+    // Only process if tab is visible (not in background)
+    return !document.hidden;
+  }
+
   private extractMessages() {
+    // Don't process if tab is in background (saves API costs)
+    if (!this.isTabVisible()) {
+      return;
+    }
+
     // ChatGPT message selectors (updated for current UI)
     const messageElements = document.querySelectorAll('[data-testid="conversation-turn"]');
     
@@ -174,6 +184,12 @@ class ConversationMonitor {
 
   private async sendChunk() {
     if (this.currentThread.length === 0) {
+      return;
+    }
+
+    // Don't send if tab is in background (saves API costs)
+    if (!this.isTabVisible()) {
+      console.log('[Memory Layer] ⏸️ Tab is in background, skipping chunk send');
       return;
     }
 
@@ -324,5 +340,6 @@ if (window.location.hostname === 'chat.openai.com') {
     }
   });
 }
+
 
 

@@ -95,3 +95,4 @@ npx supabase secrets set OPENAI_API_KEY=sk-your-key-here
 Let's start with this approach!
 
 
+

@@ -21,3 +21,4 @@ For now, you can use any 16x16, 48x48, and 128x128 PNG images. The extension wil
 The extension will load even without icons - Chrome will just show a default puzzle piece icon.
 
 
+

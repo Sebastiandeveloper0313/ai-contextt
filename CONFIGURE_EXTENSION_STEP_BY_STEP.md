@@ -75,3 +75,4 @@ Supabase Dashboard → Settings → API
 Then paste both into the JavaScript command above!
 
 
+

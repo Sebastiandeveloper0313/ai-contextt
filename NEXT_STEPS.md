@@ -66,3 +66,4 @@ If functions don't work:
 - Verify OpenAI API key is set: `npx supabase secrets list`
 
 
+
