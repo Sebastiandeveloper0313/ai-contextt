@@ -768,7 +768,8 @@ const ChatInterface: React.FC = () => {
                   const result = planState.executionResults.find(r => r.stepIndex === planIndex);
                   const isCurrent = planState.isExecuting && planState.currentStep === planIndex;
                   const lowerStep = step.toLowerCase();
-                  const isAutoCompleted = (lowerStep.includes('open') && (lowerStep.includes('tab') || lowerStep.includes('new tab')));
+                  // Only show as auto-completed if execution has started (not just when viewing the plan)
+                  const isAutoCompleted = planState.isExecuting && (lowerStep.includes('open') && (lowerStep.includes('tab') || lowerStep.includes('new tab')));
                   const isSkipped = (lowerStep.includes('navigate') && !step.match(/https?:\/\/[^\s]+/));
                   
                   return (

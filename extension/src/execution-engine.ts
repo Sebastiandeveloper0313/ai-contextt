@@ -223,7 +223,7 @@ export class ExecutionEngine {
       // Verify final URL one more time
       let verifiedUrl = finalUrl;
       try {
-        const [verifyTab] = await chrome.tabs.query({ tabId: newTab.id });
+        const verifyTab = await chrome.tabs.get(newTab.id!);
         verifiedUrl = verifyTab?.url || finalUrl;
         console.log('[Execution Engine] After navigation, tab URL:', verifiedUrl);
       } catch (verifyError: any) {
@@ -234,8 +234,9 @@ export class ExecutionEngine {
       // For Google search URLs, check if we're on search results
       if (url.includes('google.com/search')) {
         if (!verifiedUrl.includes('google.com/search') || !verifiedUrl.includes('q=')) {
-          console.warn('[Execution Engine] Not on search results page! Expected search URL, got:', verifiedUrl);
-          // Return success but with warning - extraction will handle the error
+          // Debug: May redirect to homepage before search results load - this is normal
+          console.debug('[Execution Engine] Not yet on search results page (may be loading):', verifiedUrl);
+          // Return success - extraction will handle finding the correct tab
         }
       } else {
         // For other URLs, check if we're on the target domain
@@ -315,7 +316,8 @@ export class ExecutionEngine {
         console.log('[Execution Engine] After navigation, current URL:', tab.url);
         
         if (!tab.url?.includes('google.com/search') || !tab.url?.includes('q=')) {
-          console.warn('[Execution Engine] Not on search results page! Current URL:', tab.url);
+          // Debug: May redirect to homepage before search results load - this is normal
+          console.debug('[Execution Engine] Not yet on search results page (may be loading):', tab.url);
           // Navigation succeeded but URL check failed - still return success
           // The extraction step will handle finding the correct tab
           return {
@@ -394,7 +396,8 @@ export class ExecutionEngine {
       
       // If we're not on search results, try to find the correct tab
       if (!currentUrl.includes('google.com/search') || !currentUrl.includes('q=')) {
-        console.warn('[Extract] Not on search results page! URL:', currentUrl);
+        // Debug: May be on homepage due to redirect - try to find the search results tab
+        console.debug('[Extract] Current tab not on search results, searching for correct tab:', currentUrl);
         
         // Try to find any tab with search results
         const allTabsAgain = await chrome.tabs.query({});
