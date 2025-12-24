@@ -35,23 +35,38 @@ const Auth: React.FC<AuthProps> = ({ onAuth }) => {
         if (signUpError) throw signUpError;
         if (!data.user) throw new Error('Sign up failed');
 
-        // Create user in our custom users table
-        // Use service role key for this operation (we'll need to call an Edge Function)
-        // For now, this will be handled when they first use a feature
-        // But we can also create it here via an Edge Function
+        // Wait a moment for session to be set
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Get the user's email from Supabase Auth (more reliable than form input)
+        const userEmail = data.user.email || email;
         
         // Create user in our custom users table immediately
         try {
-          const { error: userError } = await supabase.from('users').upsert({ 
-            id: data.user.id 
+          console.log('Attempting to upsert user:', { id: data.user.id, email: userEmail });
+          const { error: userError, data: userData } = await supabase.from('users').upsert({ 
+            id: data.user.id,
+            email: userEmail
           }, { onConflict: 'id' });
           
           if (userError) {
-            console.warn('Could not create user in users table:', userError);
-            // This is okay - it will be created when they first use a feature
+            console.error('Could not create/update user in users table:', userError);
+            console.error('Error code:', userError.code);
+            console.error('Error message:', userError.message);
+            console.error('Error details:', JSON.stringify(userError, null, 2));
+            // Try alternative: use insert with ignore conflict
+            const { error: insertError } = await supabase.from('users').insert({ 
+              id: data.user.id,
+              email: userEmail
+            }).select();
+            if (insertError && insertError.code !== '23505') { // 23505 is unique violation, which is okay
+              console.error('Insert also failed:', insertError);
+            }
+          } else {
+            console.log('User created/updated successfully:', userData);
           }
         } catch (err) {
-          console.warn('Error creating user in users table:', err);
+          console.error('Error creating user in users table:', err);
         }
 
         // Store credentials and auto-grant permission (they signed up, so they want to use it!)
@@ -74,18 +89,38 @@ const Auth: React.FC<AuthProps> = ({ onAuth }) => {
         if (signInError) throw signInError;
         if (!data.user) throw new Error('Sign in failed');
 
+        // Wait a moment for session to be set
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Get the user's email from Supabase Auth (more reliable than form input)
+        const userEmail = data.user.email || email;
+
         // Ensure user exists in our custom users table
         try {
-          const { error: userError } = await supabase.from('users').upsert({ 
-            id: data.user.id 
+          console.log('Attempting to upsert user:', { id: data.user.id, email: userEmail });
+          const { error: userError, data: userData } = await supabase.from('users').upsert({ 
+            id: data.user.id,
+            email: userEmail
           }, { onConflict: 'id' });
           
           if (userError) {
-            console.warn('Could not sync user to users table:', userError);
-            // This is okay - it will be created when they first use a feature
+            console.error('Could not sync user to users table:', userError);
+            console.error('Error code:', userError.code);
+            console.error('Error message:', userError.message);
+            console.error('Error details:', JSON.stringify(userError, null, 2));
+            // Try alternative: use insert with ignore conflict
+            const { error: insertError } = await supabase.from('users').insert({ 
+              id: data.user.id,
+              email: userEmail
+            }).select();
+            if (insertError && insertError.code !== '23505') { // 23505 is unique violation, which is okay
+              console.error('Insert also failed:', insertError);
+            }
+          } else {
+            console.log('User synced successfully:', userData);
           }
         } catch (err) {
-          console.warn('Error syncing user to users table:', err);
+          console.error('Error syncing user to users table:', err);
         }
 
         // Store credentials and auto-grant permission
