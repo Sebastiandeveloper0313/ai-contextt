@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
 import './sidepanel.css';
 import Auth from './auth';
+import { ExecutionEngine, ExecutionStep, ExecutionResult } from './execution-engine';
 
 // Removed Memory and Thread interfaces - no longer using these features
 
@@ -11,6 +12,21 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  mode?: 'ask' | 'do';
+  plan?: {
+    intent: string;
+    steps: string[];
+    outputType?: 'sheet' | 'csv' | 'table' | 'text';
+    requiresConfirmation: boolean;
+  };
+}
+
+interface PlanState {
+  plan: ChatMessage['plan'];
+  messageId: string;
+  isExecuting: boolean;
+  executionResults: ExecutionResult[];
+  currentStep: number;
 }
 
 // Helper function to get Supabase config (shared between components)
@@ -32,8 +48,10 @@ const ChatInterface: React.FC = () => {
   const [chatLoading, setChatLoading] = useState(false);
   const [currentPageInfo, setCurrentPageInfo] = useState<{ title: string; url: string } | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [planState, setPlanState] = useState<PlanState | null>(null);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const messagesContainerRef = React.useRef<HTMLDivElement>(null);
+  const executionEngine = React.useRef(new ExecutionEngine());
 
   useEffect(() => {
     // Get current page info
@@ -207,12 +225,25 @@ const ChatInterface: React.FC = () => {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: chatData.response || 'I apologize, but I could not generate a response.',
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        mode: chatData.mode || 'ask',
+        plan: chatData.plan
       };
 
       const finalMessages = [...newMessages, assistantMessage];
       setMessages(finalMessages);
       saveChatHistory(finalMessages);
+
+      // If DO mode with plan, show confirmation UI
+      if (chatData.mode === 'do' && chatData.plan) {
+        setPlanState({
+          plan: chatData.plan,
+          messageId: assistantMessage.id,
+          isExecuting: false,
+          executionResults: [],
+          currentStep: 0
+        });
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       const errorMessage: ChatMessage = {
@@ -234,6 +265,197 @@ const ChatInterface: React.FC = () => {
       e.preventDefault();
       sendMessage();
     }
+  };
+
+  const executePlan = async () => {
+    if (!planState?.plan) return;
+
+    setPlanState({ ...planState, isExecuting: true, executionResults: [], currentStep: 0 });
+
+    // Convert plan steps to execution steps
+    let executionSteps: ExecutionStep[] = [];
+    let previousWasSearch = false;
+    
+    console.log('[Execute Plan] Converting', planState.plan.steps.length, 'plan steps to execution steps');
+    
+    for (let index = 0; index < planState.plan.steps.length; index++) {
+      const step = planState.plan.steps[index];
+      const lowerStep = step.toLowerCase();
+      
+      if (lowerStep.includes('search') || (lowerStep.includes('google') && lowerStep.includes('search'))) {
+        const query = step.match(/search.*?for\s+["']?([^"']+)["']?/i)?.[1] || 
+                      step.match(/["']([^"']+)["']/)?.[1] || '';
+        executionSteps.push({
+          type: 'search' as const,
+          description: step,
+          params: { query }
+        });
+        previousWasSearch = true;
+      } else if (lowerStep.includes('extract') || lowerStep.includes('get') || lowerStep.includes('collect') || 
+                 lowerStep.includes('compile') || lowerStep.includes('list')) {
+        // After a search step, extract from search results
+        // Otherwise use generic selectors
+        executionSteps.push({
+          type: 'extract' as const,
+          description: step,
+          params: { selector: previousWasSearch ? 'div.g, div[data-ved]' : 'div.g, div[data-ved], .result, .item, a, h3' }
+        });
+        previousWasSearch = false;
+      } else if (lowerStep.includes('navigate') || lowerStep.includes('go to')) {
+        const url = step.match(/https?:\/\/[^\s]+/)?.[0] || '';
+        if (url) {
+          executionSteps.push({
+            type: 'navigate' as const,
+            description: step,
+            params: { url }
+          });
+        }
+        // Skip if no URL found (might be "open a new tab" which we don't need)
+        previousWasSearch = false;
+      } else if (lowerStep.includes('open') && (lowerStep.includes('tab') || lowerStep.includes('new tab'))) {
+        // Skip "open a new tab" - we're already in browser context
+        console.log('[Execute Plan] Skipping step:', step);
+        previousWasSearch = false;
+        // Don't add any step, just continue
+      } else if (lowerStep.includes('create') && (lowerStep.includes('sheet') || lowerStep.includes('csv'))) {
+        executionSteps.push({
+          type: 'create_output' as const,
+          description: step,
+          params: { outputType: planState.plan.outputType || 'csv' }
+        });
+        previousWasSearch = false;
+      } else if (lowerStep.includes('wait') || lowerStep.includes('delay')) {
+        executionSteps.push({
+          type: 'wait' as const,
+          description: step,
+          params: { text: '2000' } // 2 seconds for page loads
+        });
+        previousWasSearch = false;
+      } else {
+        // For steps like "compile list" or "format", add a wait to ensure page is loaded
+        if (previousWasSearch) {
+          executionSteps.push({
+            type: 'wait' as const,
+            description: 'Wait for page to load',
+            params: { text: '2000' }
+          });
+        }
+        previousWasSearch = false;
+      }
+    }
+    
+    console.log('[Execute Plan] Created', executionSteps.length, 'execution steps:', executionSteps.map(s => s.type));
+
+    // Ensure proper step order: search -> extract -> create output
+    if (planState.plan.outputType && planState.plan.outputType !== 'text') {
+      const hasExtraction = executionSteps.some(s => s.type === 'extract');
+      const hasSearch = executionSteps.some(s => s.type === 'search');
+      const hasOutput = executionSteps.some(s => s.type === 'create_output');
+      
+      // If we have a search but no extraction, add extraction after search
+      if (hasSearch && !hasExtraction) {
+        let lastSearchIndex = -1;
+        for (let i = executionSteps.length - 1; i >= 0; i--) {
+          if (executionSteps[i].type === 'search') {
+            lastSearchIndex = i;
+            break;
+          }
+        }
+        if (lastSearchIndex >= 0) {
+          executionSteps.splice(lastSearchIndex + 1, 0, {
+            type: 'wait',
+            description: 'Wait for search results to load',
+            params: { text: '2000' }
+          });
+          executionSteps.splice(lastSearchIndex + 2, 0, {
+            type: 'extract',
+            description: 'Extract search results',
+            params: { selector: 'div.g, div[data-ved]' }
+          });
+        }
+      }
+      
+      // Move all create_output steps to the end, after extraction
+      const outputSteps = executionSteps.filter(s => s.type === 'create_output');
+      executionSteps = executionSteps.filter(s => s.type !== 'create_output');
+      
+      // Add output creation at the end if not already present
+      if (!hasOutput && outputSteps.length === 0) {
+        executionSteps.push({
+          type: 'create_output',
+          description: `Create ${planState.plan.outputType} output`,
+          params: { outputType: planState.plan.outputType }
+        });
+      } else if (outputSteps.length > 0) {
+        // Add existing output steps at the end
+        executionSteps.push(...outputSteps);
+      }
+    }
+    
+    console.log('[Execute Plan] Final execution steps:', executionSteps.length);
+    if (executionSteps.length === 0) {
+      console.error('[Execute Plan] No execution steps created!');
+      setPlanState(prev => prev ? {
+        ...prev,
+        isExecuting: false,
+        executionResults: [{
+          success: false,
+          stepIndex: 0,
+          status: 'No executable steps',
+          error: 'Could not convert plan steps to executable actions'
+        }]
+      } : null);
+      return;
+    }
+
+    executionEngine.current.executePlan(
+      executionSteps,
+      (result: ExecutionResult) => {
+        setPlanState(prev => prev ? {
+          ...prev,
+          executionResults: [...prev.executionResults, result],
+          currentStep: result.stepIndex
+        } : null);
+      },
+      (results: ExecutionResult[]) => {
+        const successCount = results.filter(r => r.success).length;
+        const totalSteps = results.length;
+
+        // Add completion message with helpful info
+        let completionText = `✅ Execution complete! ${successCount} of ${totalSteps} steps succeeded.`;
+        
+        // Check if we created a CSV/Sheet
+        const outputStep = results.find(r => r.data?.rowCount);
+        if (outputStep?.data) {
+          completionText += `\n\n📊 Created ${outputStep.data.rowCount} rows of data.`;
+          if (outputStep.data.instructions) {
+            completionText += `\n\n${outputStep.data.instructions}`;
+          }
+        }
+        
+        const completionMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: completionText,
+          timestamp: Date.now(),
+          mode: 'do'
+        };
+        setMessages(prev => [...prev, completionMessage]);
+        saveChatHistory([...messages, completionMessage]);
+
+        // Clear plan state after a short delay to show completion
+        setTimeout(() => {
+          setPlanState(null);
+        }, 2000); // 2 second delay to show completion status
+      }
+    );
+  };
+
+  const cancelPlan = () => {
+    if (planState?.isExecuting) {
+      executionEngine.current.stop();
+    }
+    setPlanState(null);
   };
 
   return (
@@ -393,6 +615,127 @@ const ChatInterface: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Plan Confirmation UI */}
+        {planState && planState.plan && (
+          <div style={{
+            margin: '12px',
+            padding: '16px',
+            backgroundColor: '#f0f7ff',
+            border: '2px solid #2196f3',
+            borderRadius: '8px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '16px' }}>🤖</span>
+                <strong style={{ fontSize: '14px', color: '#2196f3' }}>DO Mode: {planState.plan.intent}</strong>
+              </div>
+              {planState.isExecuting && (
+                <button
+                  onClick={cancelPlan}
+                  style={{
+                    padding: '4px 12px',
+                    fontSize: '12px',
+                    border: '1px solid #f44336',
+                    borderRadius: '4px',
+                    backgroundColor: '#fff',
+                    color: '#f44336',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Stop
+                </button>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '12px' }}>
+              <strong style={{ fontSize: '12px', color: '#666', display: 'block', marginBottom: '8px' }}>Execution Plan:</strong>
+              <ol style={{ margin: 0, paddingLeft: '20px', fontSize: '13px' }}>
+                {planState.plan.steps.map((step, index) => {
+                  const result = planState.executionResults.find(r => r.stepIndex === index);
+                  const isCurrent = planState.isExecuting && planState.currentStep === index;
+                  return (
+                    <li key={index} style={{
+                      marginBottom: '4px',
+                      color: result?.success === false ? '#f44336' : 
+                             result?.success === true ? '#4caf50' :
+                             isCurrent ? '#2196f3' : '#333',
+                      fontWeight: isCurrent ? '600' : 'normal'
+                    }}>
+                      {step}
+                      {result && (
+                        <span style={{ fontSize: '11px', marginLeft: '8px', color: '#666' }}>
+                          {result.success ? '✓' : '✗'} {result.status}
+                        </span>
+                      )}
+                      {isCurrent && !result && (
+                        <span style={{ fontSize: '11px', marginLeft: '8px', color: '#2196f3' }}>
+                          ⏳ Executing...
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+
+            {planState.plan.outputType && (
+              <div style={{ fontSize: '12px', color: '#666', marginBottom: '12px' }}>
+                Output: {planState.plan.outputType.toUpperCase()}
+              </div>
+            )}
+
+            {!planState.isExecuting && planState.executionResults.length === 0 && (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={executePlan}
+                  style={{
+                    flex: 1,
+                    padding: '8px 16px',
+                    fontSize: '13px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    backgroundColor: '#2196f3',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontWeight: '600'
+                  }}
+                >
+                  ✓ Execute Plan
+                </button>
+                <button
+                  onClick={cancelPlan}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '13px',
+                    border: '1px solid #ddd',
+                    borderRadius: '6px',
+                    backgroundColor: '#fff',
+                    color: '#666',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {!planState.isExecuting && planState.executionResults.length > 0 && (
+              <div style={{
+                padding: '8px',
+                backgroundColor: '#e8f5e9',
+                borderRadius: '4px',
+                fontSize: '12px',
+                color: '#2e7d32',
+                textAlign: 'center',
+                fontWeight: '600'
+              }}>
+                ✅ Execution completed successfully
+              </div>
+            )}
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 

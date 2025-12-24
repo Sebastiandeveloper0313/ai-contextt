@@ -8,7 +8,9 @@
     "activeTab",
     "sidePanel",
     "tabs",
-    "scripting"
+    "scripting",
+    "downloads",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",

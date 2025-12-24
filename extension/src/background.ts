@@ -70,5 +70,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+
+  // Handle CSV download
+  if (message.type === 'DOWNLOAD_CSV') {
+    // Create data URL instead of blob URL (works in service workers)
+    const dataUrl = 'data:text/csv;charset=utf-8,' + encodeURIComponent(message.csv);
+    
+    chrome.downloads.download({
+      url: dataUrl,
+      filename: message.filename || `extracted-data-${Date.now()}.csv`,
+      saveAs: true
+    }, (downloadId) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ success: true, downloadId });
+      }
+    });
+    return true; // Keep channel open for async response
+  }
 });
 
