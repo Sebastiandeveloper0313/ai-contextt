@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
+import ReactMarkdown from 'react-markdown';
 import './sidepanel.css';
 import Auth from './auth';
 
@@ -46,7 +47,9 @@ const ChatInterface: React.FC = () => {
   const [input, setInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [currentPageInfo, setCurrentPageInfo] = useState<{ title: string; url: string } | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const messagesContainerRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Get current page info
@@ -70,7 +73,34 @@ const ChatInterface: React.FC = () => {
   useEffect(() => {
     // Scroll to bottom when new message
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Hide scroll button when at bottom
+    setShowScrollButton(false);
   }, [messages]);
+
+  // Check scroll position
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const checkScrollPosition = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50; // 50px threshold
+      setShowScrollButton(!isAtBottom);
+    };
+
+    container.addEventListener('scroll', checkScrollPosition);
+    // Check initial position
+    checkScrollPosition();
+
+    return () => {
+      container.removeEventListener('scroll', checkScrollPosition);
+    };
+  }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setShowScrollButton(false);
+  };
 
   const saveChatHistory = (newMessages: ChatMessage[]) => {
     chrome.storage.local.set({ sidepanelChatHistory: newMessages });
@@ -245,12 +275,15 @@ const ChatInterface: React.FC = () => {
         </div>
       )}
 
-      <div style={{ 
-        flex: 1, 
-        overflowY: 'auto', 
-        padding: '8px',
-        minHeight: 0
-      }}>
+      <div 
+        ref={messagesContainerRef}
+        style={{ 
+          flex: 1, 
+          overflowY: 'auto', 
+          padding: '8px',
+          minHeight: 0
+        }}
+      >
         {messages.length === 0 ? (
           <div style={{ 
             textAlign: 'center', 
@@ -285,11 +318,75 @@ const ChatInterface: React.FC = () => {
                   color: msg.role === 'user' ? '#fff' : '#333',
                   border: msg.role === 'user' ? 'none' : '1px solid #e0e0e0',
                   fontSize: '14px',
-                  lineHeight: '1.5',
+                  lineHeight: '1.6',
                   wordWrap: 'break-word'
                 }}
               >
-                {msg.content}
+                {msg.role === 'assistant' ? (
+                  <ReactMarkdown
+                    components={{
+                      // Headings
+                      h1: ({node, ...props}) => <h1 style={{ fontSize: '20px', fontWeight: '700', margin: '16px 0 8px 0', color: '#333', borderBottom: '2px solid #e0e0e0', paddingBottom: '4px' }} {...props} />,
+                      h2: ({node, ...props}) => <h2 style={{ fontSize: '18px', fontWeight: '600', margin: '14px 0 6px 0', color: '#333' }} {...props} />,
+                      h3: ({node, ...props}) => <h3 style={{ fontSize: '16px', fontWeight: '600', margin: '12px 0 4px 0', color: '#333' }} {...props} />,
+                      // Paragraphs with spacing
+                      p: ({node, ...props}) => <p style={{ margin: '8px 0', color: 'inherit' }} {...props} />,
+                      // Lists
+                      ul: ({node, ...props}) => <ul style={{ margin: '8px 0', paddingLeft: '20px', color: 'inherit' }} {...props} />,
+                      ol: ({node, ...props}) => <ol style={{ margin: '8px 0', paddingLeft: '20px', color: 'inherit' }} {...props} />,
+                      li: ({node, ...props}) => <li style={{ margin: '4px 0', color: 'inherit' }} {...props} />,
+                      // Bold and italic
+                      strong: ({node, ...props}) => <strong style={{ fontWeight: '700', color: 'inherit' }} {...props} />,
+                      em: ({node, ...props}) => <em style={{ fontStyle: 'italic', color: 'inherit' }} {...props} />,
+                      // Code blocks
+                      code: ({node, inline, ...props}: any) => 
+                        inline ? (
+                          <code style={{ 
+                            backgroundColor: msg.role === 'user' ? 'rgba(255,255,255,0.2)' : '#f4f4f4', 
+                            padding: '2px 6px', 
+                            borderRadius: '4px', 
+                            fontSize: '13px',
+                            fontFamily: 'monospace',
+                            color: 'inherit'
+                          }} {...props} />
+                        ) : (
+                          <code style={{ 
+                            display: 'block',
+                            backgroundColor: msg.role === 'user' ? 'rgba(255,255,255,0.15)' : '#f4f4f4', 
+                            padding: '10px', 
+                            borderRadius: '6px', 
+                            fontSize: '13px',
+                            fontFamily: 'monospace',
+                            overflowX: 'auto',
+                            margin: '8px 0',
+                            color: 'inherit',
+                            whiteSpace: 'pre-wrap'
+                          }} {...props} />
+                        ),
+                      pre: ({node, ...props}) => <pre style={{ margin: '8px 0', color: 'inherit' }} {...props} />,
+                      // Links
+                      a: ({node, ...props}) => <a style={{ color: msg.role === 'user' ? '#fff' : '#2196f3', textDecoration: 'underline' }} {...props} />,
+                      // Blockquotes
+                      blockquote: ({node, ...props}) => <blockquote style={{ 
+                        margin: '8px 0', 
+                        paddingLeft: '12px', 
+                        borderLeft: `3px solid ${msg.role === 'user' ? 'rgba(255,255,255,0.5)' : '#ddd'}`,
+                        color: 'inherit',
+                        fontStyle: 'italic'
+                      }} {...props} />,
+                      // Horizontal rule
+                      hr: ({node, ...props}) => <hr style={{ 
+                        margin: '12px 0', 
+                        border: 'none', 
+                        borderTop: `1px solid ${msg.role === 'user' ? 'rgba(255,255,255,0.3)' : '#e0e0e0'}` 
+                      }} {...props} />,
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                ) : (
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                )}
               </div>
             </div>
           ))
@@ -314,6 +411,59 @@ const ChatInterface: React.FC = () => {
         )}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Scroll to bottom button - floating above input */}
+      {showScrollButton && (
+        <div style={{
+          position: 'relative',
+          height: '0',
+          flexShrink: 0
+        }}>
+          <button
+            onClick={scrollToBottom}
+            style={{
+              position: 'absolute',
+              bottom: '8px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: 'white',
+              border: '2px solid #000',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+              transition: 'background-color 0.2s, transform 0.2s',
+              zIndex: 100
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#f5f5f5';
+              e.currentTarget.style.transform = 'translateX(-50%) scale(1.05)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'white';
+              e.currentTarget.style.transform = 'translateX(-50%) scale(1)';
+            }}
+            aria-label="Scroll to bottom"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#000"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       <div style={{ 
         display: 'flex', 

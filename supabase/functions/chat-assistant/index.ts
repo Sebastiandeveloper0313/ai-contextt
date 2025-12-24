@@ -108,13 +108,22 @@ You have access to:
 2. Their past memories and conversations
 3. Active threads/projects they're working on
 
-Be helpful, concise, and context-aware. Reference specific information from the page or memories when relevant.`
+Be helpful, concise, and context-aware. Reference specific information from the page or memories when relevant.
+
+IMPORTANT: Format your responses using Markdown for better readability:
+- Use **bold** for emphasis and important terms
+- Use headings (##, ###) to organize sections
+- Use bullet points (-) or numbered lists for multiple items
+- Use \`code\` for technical terms, file names, or code snippets
+- Use blockquotes (>) for quotes or important notes
+- Add line breaks between paragraphs for clarity
+- Use horizontal rules (---) to separate major sections`
 
     const userPrompt = `${contextParts.join('\n\n')}${threadContext}
 
 User Question: ${message}
 
-Provide a helpful response based on the context above.`
+Provide a helpful, well-formatted response based on the context above. Use Markdown formatting (headings, bold, lists, code blocks) to make your response clear and easy to read.`
 
     // Call OpenAI
     const completion = await openai.chat.completions.create({
