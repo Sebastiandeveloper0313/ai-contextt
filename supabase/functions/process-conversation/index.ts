@@ -100,7 +100,7 @@ ${conversationText}
 JSON:`
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
+      model: 'gpt-3.5-turbo',
       messages: [
         {
           role: 'system',
@@ -188,7 +188,7 @@ ${threadMemories}
 Description:`
 
       const summaryCompletion = await openai.chat.completions.create({
-        model: 'gpt-4-turbo-preview',
+        model: 'gpt-3.5-turbo',
         messages: [
           { role: 'system', content: 'You are a summarization system. Create concise, informative descriptions.' },
           { role: 'user', content: summaryPrompt }

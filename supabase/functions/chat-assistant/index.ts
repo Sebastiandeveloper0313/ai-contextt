@@ -118,7 +118,7 @@ Provide a helpful response based on the context above.`
 
     // Call OpenAI
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4-turbo-preview',
+      model: 'gpt-3.5-turbo',
       messages: [
         { role: 'system', content: systemPrompt },
         ...conversationHistory.slice(-6), // Last 6 messages for context
