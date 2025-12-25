@@ -16,6 +16,9 @@
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
+    "https://www.google.com/*",
+    "https://google.com/*",
+    "https://docs.google.com/*",
     "<all_urls>"
   ],
   "content_scripts": [

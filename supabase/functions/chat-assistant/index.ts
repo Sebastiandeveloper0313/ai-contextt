@@ -75,7 +75,8 @@ When the user requests an action (search, extract, create, navigate, etc.), you 
 }
 
 Rules:
-- "intent" should be a clear, one-sentence description
+- "intent" should be a clear, one-sentence description that EXACTLY matches what the user asked for
+- DO NOT add extra qualifiers, locations, or context that the user didn't mention (e.g., if user says "top 3 restaurants in gothenburg", don't add "on a reliable review website")
 - "steps" should be an array of 3-10 clear, actionable steps
 - "outputType" should be "sheet" for Google Sheets, "csv" for CSV files, "table" for table preview, "text" for plain text
 - "requiresConfirmation" should be true for any action that modifies data, creates files, or navigates away
@@ -129,7 +130,7 @@ ${pageContext ? `(Note: I'm viewing ${pageContext.title} but couldn't access the
             JSON.stringify({ 
               mode: 'do',
               plan,
-              response: `I'll help you ${plan.intent}. Here's my plan:\n\n${plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nWould you like me to proceed?`,
+              response: '', // No response text - just execute silently
               hasPageContext: !!pageContext
             }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
